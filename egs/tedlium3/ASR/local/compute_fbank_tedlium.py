@@ -88,14 +88,25 @@ def compute_fbank_tedlium():
             cur_num_jobs = num_jobs if ex is None else 80
             cur_num_jobs = min(cur_num_jobs, len(cut_set))
 
-            cut_set = cut_set.compute_and_store_features(
-                extractor=extractor,
-                storage_path=f"{output_dir}/{prefix}_feats_{partition}",
-                # when an executor is specified, make more partitions
-                num_jobs=cur_num_jobs,
-                executor=ex,
-                storage_type=LilcomChunkyWriter,
-            )
+            print('cur_num_jobs:', cur_num_jobs)
+
+            # cut_set = cut_set.compute_and_store_features(
+            #     extractor=extractor,
+            #     storage_path=f"{output_dir}/{prefix}_feats_{partition}",
+            #     # when an executor is specified, make more partitions
+            #     num_jobs=cur_num_jobs,
+            #     executor=ex,
+            #     storage_type=LilcomChunkyWriter,
+            # )
+
+
+            cut_set = cut_set.compute_and_store_features_batch(
+                 extractor=extractor,
+                 storage_path=f"{output_dir}/{prefix}_feats_{partition}",
+                 batch_duration=500,
+                 num_workers=cur_num_jobs,
+                 storage_type=LilcomChunkyWriter,
+             )
             # Split long cuts into many short and un-overlapping cuts
             cut_set = cut_set.trim_to_supervisions(keep_overlapping=False)
             cut_set.to_file(output_dir / f"{prefix}_cuts_{partition}.{suffix}")

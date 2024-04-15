@@ -913,6 +913,8 @@ def run(rank, world_size, args):
 
     train_cuts = tedlium.train_cuts()
 
+    # print('train_cuts:', train_cuts)
+
     if params.start_batch > 0 and checkpoints and "sampler" in checkpoints:
         # We only load the sampler's state dict when it loads a checkpoint
         # saved in the middle of an epoch

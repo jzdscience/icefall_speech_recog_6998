@@ -353,8 +353,14 @@ class TedLiumAsrDataModule:
     @lru_cache()
     def train_cuts(self) -> CutSet:
         logging.info("About to get train cuts")
+        # print(self.args.manifest_dir)
+        # import os
+        # print(os.path.isfile(self.args.manifest_dir / "tedlium_cuts_train.jsonl.gz"))
+        # print(load_manifest_lazy(
+        #     '.'/ self.args.manifest_dir / "tedlium_cuts_train.jsonl.gz"
+        # ))
         return load_manifest_lazy(
-            self.args.manifest_dir / "tedlium_cuts_train.jsonl.gz"
+             self.args.manifest_dir / "tedlium_cuts_train.jsonl.gz"
         )
 
     @lru_cache()
