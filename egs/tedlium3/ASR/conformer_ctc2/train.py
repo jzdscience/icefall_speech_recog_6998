@@ -284,6 +284,15 @@ def get_parser() -> argparse.ArgumentParser:
         help="Whether to use half precision training.",
     )
 
+    parser.add_argument(
+        "--conv-type",
+        type=str,
+        default="all_conv",
+        choices=["all_conv", "no_conv", "all_tdnn"],
+        help="""it specifies the type of convolution used in the individual conformer block.
+        """,
+    )
+
     add_model_arguments(parser)
 
     return parser
@@ -871,10 +880,13 @@ def run(rank, world_size, args):
         dim_feedforward=params.dim_feedforward,
         num_encoder_layers=params.num_encoder_layers,
         num_decoder_layers=params.num_decoder_layers,
+        conv_type=params.conv_type
     )
 
     num_param = sum([p.numel() for p in model.parameters()])
     logging.info(f"Number of model parameters: {num_param}")
+
+    logging.info(f"model structure {model}")
 
     assert params.save_every_n >= params.average_period
     model_avg: Optional[torch.nn.Module] = None

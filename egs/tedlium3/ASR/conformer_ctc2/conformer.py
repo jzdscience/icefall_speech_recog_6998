@@ -50,6 +50,7 @@ class Conformer(Transformer):
         layer_dropout: float = 0.075,
         cnn_module_kernel: int = 31,
         aux_layer_period: int = 3,
+        conv_type: str = 'all_convolution'
     ) -> None:
         """
         Args:
@@ -108,14 +109,36 @@ class Conformer(Transformer):
 
         self.encoder_pos = RelPositionalEncoding(d_model, dropout)
 
-        encoder_layer = ConformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            layer_dropout=layer_dropout,
-            cnn_module_kernel=cnn_module_kernel,
-        )
+        self.conv_type = conv_type
+
+        # here we switch between different conformer encoder layers
+        if self.conv_type == 'all_conv':
+          encoder_layer = ConformerEncoderLayer(
+              d_model=d_model,
+              nhead=nhead,
+              dim_feedforward=dim_feedforward,
+              dropout=dropout,
+              layer_dropout=layer_dropout,
+              cnn_module_kernel=cnn_module_kernel,
+          )
+        elif self.conv_type == 'no_conv':
+          encoder_layer = ConformerEncoderLayerNoConv(
+              d_model=d_model,
+              nhead=nhead,
+              dim_feedforward=dim_feedforward,
+              dropout=dropout,
+              layer_dropout=layer_dropout,
+              cnn_module_kernel=cnn_module_kernel,
+          )
+        elif self.conv_type == 'all_tdnn':
+            encoder_layer = ConformerEncoderLayerTDNN(
+              d_model=d_model,
+              nhead=nhead,
+              dim_feedforward=dim_feedforward,
+              dropout=dropout,
+              layer_dropout=layer_dropout,
+              cnn_module_kernel=cnn_module_kernel,
+          )
 
         # aux_layers from 1/3
         self.encoder = ConformerEncoder(
@@ -1034,7 +1057,7 @@ class ConvolutionModule(nn.Module):
 
 
 ## adding the TDNN model
-class Tdnn(nn.Module):
+class TdnnModule(nn.Module):
     def __init__(self, num_features: int, output_dim: int):
         """
         Args:
@@ -1046,34 +1069,75 @@ class Tdnn(nn.Module):
         super().__init__()
 
         # Note: We don't use paddings inside conv layers
+
+        # version 1: yesno
+        # self.tdnn = nn.Sequential(
+        #     nn.Conv1d(
+        #         in_channels=num_features,
+        #         out_channels=32,
+        #         kernel_size=3,
+        #     ),
+        #     nn.ReLU(inplace=True),
+        #     nn.BatchNorm1d(num_features=32, affine=False),
+        #     nn.Conv1d(
+        #         in_channels=32,
+        #         out_channels=32,
+        #         kernel_size=5,
+        #         dilation=2,
+        #     ),
+        #     nn.ReLU(inplace=True),
+        #     nn.BatchNorm1d(num_features=32, affine=False),
+        #     nn.Conv1d(
+        #         in_channels=32,
+        #         out_channels=32,
+        #         kernel_size=5,
+        #         dilation=4,
+        #     ),
+        #     nn.ReLU(inplace=True),
+        #     nn.BatchNorm1d(num_features=32, affine=False),
+        # )
+
+        # self.output_linear = nn.Linear(in_features=32, out_features=output_dim)
+
+        # version 2: tdnn lstm
         self.tdnn = nn.Sequential(
             nn.Conv1d(
                 in_channels=num_features,
-                out_channels=32,
+                out_channels=500,
                 kernel_size=3,
+                stride=1,
+                padding=1,
             ),
             nn.ReLU(inplace=True),
-            nn.BatchNorm1d(num_features=32, affine=False),
+            nn.BatchNorm1d(num_features=500, affine=False),
             nn.Conv1d(
-                in_channels=32,
-                out_channels=32,
-                kernel_size=5,
+                in_channels=500,
+                out_channels=500,
+                kernel_size=3,
+                stride=1,
                 dilation=2,
+                padding=2,
             ),
             nn.ReLU(inplace=True),
-            nn.BatchNorm1d(num_features=32, affine=False),
+            nn.BatchNorm1d(num_features=500, affine=False),
             nn.Conv1d(
-                in_channels=32,
-                out_channels=32,
-                kernel_size=5,
+                in_channels=500,
+                out_channels=500,
+                kernel_size=3,
+                stride=1,  
                 dilation=4,
+                padding=4,
             ),
             nn.ReLU(inplace=True),
-            nn.BatchNorm1d(num_features=32, affine=False),
+            nn.BatchNorm1d(num_features=500, affine=False),
         )
-        self.output_linear = nn.Linear(in_features=32, out_features=output_dim)
 
-    def forward(self, x: torch.Tensor, x_lens: torch.Tensor) -> torch.Tensor:
+        self.output_linear = nn.Linear(in_features=500, out_features=output_dim)
+
+    def forward(self, 
+                x: torch.Tensor
+                # , x_lens: torch.Tensor
+                ) -> torch.Tensor:
         """
         Args:
           x:
@@ -1099,5 +1163,337 @@ class Tdnn(nn.Module):
         # the second layer reduces T by (5-1)*2 frames
         # the second layer reduces T by (5-1)*4 frames
         # Number of output frames is 2 + 4*2 + 4*4 = 2 + 8 + 16 = 26
-        x_lens = x_lens - 26
-        return logits, x_lens
+        # x_lens = x_lens - 26
+        return logits
+
+class ConformerEncoderLayerTDNN(nn.Module):
+    """
+    ConformerEncoderLayer is made up of self-attn, feedforward and convolution networks.
+    See: "Conformer: Convolution-augmented Transformer for Speech Recognition"
+
+    Examples:
+        >>> encoder_layer = ConformerEncoderLayer(d_model=512, nhead=8)
+        >>> src = torch.rand(10, 32, 512)
+        >>> pos_emb = torch.rand(32, 19, 512)
+        >>> out = encoder_layer(src, pos_emb)
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        bypass_scale: float = 0.1,
+        layer_dropout: float = 0.075,
+        cnn_module_kernel: int = 31,
+    ) -> None:
+        """
+        Args:
+          d_model:
+            the number of expected features in the input (required).
+          nhead:
+            the number of heads in the multiheadattention models (required).
+          dim_feedforward:
+            the dimension of the feedforward network model (default=2048).
+          dropout:
+            the dropout value (default=0.1).
+          bypass_scale:
+            a scale on the layer's output, used in bypass (resnet-type) skip-connection;
+            when the layer is bypassed the final output will be a
+            weighted sum of the layer's input and layer's output with weights
+            (1.0-bypass_scale) and bypass_scale correspondingly (default=0.1).
+          layer_dropout:
+            the probability to bypass the layer (default=0.075).
+          cnn_module_kernel (int):
+            kernel size of convolution module (default=31).
+        """
+        super().__init__()
+
+        if bypass_scale < 0.0 or bypass_scale > 1.0:
+            raise ValueError("bypass_scale should be between 0.0 and 1.0")
+
+        if layer_dropout < 0.0 or layer_dropout > 1.0:
+            raise ValueError("layer_dropout should be between 0.0 and 1.0")
+
+        self.bypass_scale = bypass_scale
+        self.layer_dropout = layer_dropout
+
+        self.self_attn = RelPositionMultiheadAttention(d_model, nhead, dropout=0.0)
+
+        self.feed_forward = nn.Sequential(
+            ScaledLinear(d_model, dim_feedforward),
+            ActivationBalancer(channel_dim=-1),
+            DoubleSwish(),
+            nn.Dropout(dropout),
+            ScaledLinear(dim_feedforward, d_model, initial_scale=0.25),
+        )
+
+        self.feed_forward_macaron = nn.Sequential(
+            ScaledLinear(d_model, dim_feedforward),
+            ActivationBalancer(channel_dim=-1),
+            DoubleSwish(),
+            nn.Dropout(dropout),
+            ScaledLinear(dim_feedforward, d_model, initial_scale=0.25),
+        )
+
+
+        #add tdnn
+        ## take dmodel dimension and return dmodel dimension?
+        
+        self.tdnn_module = TdnnModule(d_model, d_model)
+
+        # self.conv_module = ConvolutionModule(d_model, cnn_module_kernel)
+
+        self.norm_final = BasicNorm(d_model)
+
+        # try to ensure the output is close to zero-mean (or at least, zero-median).
+        self.balancer = ActivationBalancer(
+            channel_dim=-1, min_positive=0.45, max_positive=0.55, max_abs=6.0
+        )
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self,
+        src: torch.Tensor,
+        pos_emb: torch.Tensor,
+        src_mask: Optional[torch.Tensor] = None,
+        src_key_padding_mask: Optional[torch.Tensor] = None,
+        warmup: float = 1.0,
+    ) -> torch.Tensor:
+        """
+        Pass the input through the encoder layer.
+
+        Args:
+          src:
+            the sequence to the encoder layer of shape (S, N, C) (required).
+          pos_emb:
+            positional embedding tensor of shape (N, 2*S-1, C) (required).
+          src_mask:
+            the mask for the src sequence of shape (S, S) (optional).
+          src_key_padding_mask:
+            the mask for the src keys per batch of shape (N, S) (optional).
+          warmup:
+            controls selective bypass of of layers; if < 1.0, we will
+            bypass layers more frequently.
+
+        Returns:
+            Output tensor of the shape (S, N, C), where
+            S is the source sequence length,
+            N is the batch size,
+            C is the feature number
+        """
+        src_orig = src
+
+        warmup_scale = min(self.bypass_scale + warmup, 1.0)
+        # alpha = 1.0 means fully use this encoder layer, 0.0 would mean
+        # completely bypass it.
+        if self.training:
+            alpha = (
+                warmup_scale
+                if torch.rand(()).item() <= (1.0 - self.layer_dropout)
+                else self.bypass_scale
+            )
+        else:
+            alpha = 1.0
+
+        # macaron style feed forward module
+        src = src + self.dropout(self.feed_forward_macaron(src))
+
+        # multi-headed self-attention module
+        src_att = self.self_attn(
+            src,
+            src,
+            src,
+            pos_emb=pos_emb,
+            attn_mask=src_mask,
+            key_padding_mask=src_key_padding_mask,
+        )[0]
+
+        src = src + self.dropout(src_att)
+
+        # convolution module
+        # src = src + self.dropout(self.conv_module(src))
+
+        # replace convolution module with TDNN
+        # print(src.shape)
+        # print(self.tdnn_module(src).shape)
+        # print(self.dropout(self.tdnn_module(src)).shape)
+        src = src + self.dropout(self.tdnn_module(src))
+
+        # feed forward module
+        src = src + self.dropout(self.feed_forward(src))
+
+        src = self.norm_final(self.balancer(src))
+
+        if alpha != 1.0:
+            src = alpha * src + (1 - alpha) * src_orig
+
+        return src
+
+class ConformerEncoderLayerNoConv(nn.Module):
+    """
+    ConformerEncoderLayer is made up of self-attn, feedforward and convolution networks.
+    See: "Conformer: Convolution-augmented Transformer for Speech Recognition"
+
+    Examples:
+        >>> encoder_layer = ConformerEncoderLayer(d_model=512, nhead=8)
+        >>> src = torch.rand(10, 32, 512)
+        >>> pos_emb = torch.rand(32, 19, 512)
+        >>> out = encoder_layer(src, pos_emb)
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        bypass_scale: float = 0.1,
+        layer_dropout: float = 0.075,
+        cnn_module_kernel: int = 31,
+    ) -> None:
+        """
+        Args:
+          d_model:
+            the number of expected features in the input (required).
+          nhead:
+            the number of heads in the multiheadattention models (required).
+          dim_feedforward:
+            the dimension of the feedforward network model (default=2048).
+          dropout:
+            the dropout value (default=0.1).
+          bypass_scale:
+            a scale on the layer's output, used in bypass (resnet-type) skip-connection;
+            when the layer is bypassed the final output will be a
+            weighted sum of the layer's input and layer's output with weights
+            (1.0-bypass_scale) and bypass_scale correspondingly (default=0.1).
+          layer_dropout:
+            the probability to bypass the layer (default=0.075).
+          cnn_module_kernel (int):
+            kernel size of convolution module (default=31).
+        """
+        super().__init__()
+
+        if bypass_scale < 0.0 or bypass_scale > 1.0:
+            raise ValueError("bypass_scale should be between 0.0 and 1.0")
+
+        if layer_dropout < 0.0 or layer_dropout > 1.0:
+            raise ValueError("layer_dropout should be between 0.0 and 1.0")
+
+        self.bypass_scale = bypass_scale
+        self.layer_dropout = layer_dropout
+
+        self.self_attn = RelPositionMultiheadAttention(d_model, nhead, dropout=0.0)
+
+        self.feed_forward = nn.Sequential(
+            ScaledLinear(d_model, dim_feedforward),
+            ActivationBalancer(channel_dim=-1),
+            DoubleSwish(),
+            nn.Dropout(dropout),
+            ScaledLinear(dim_feedforward, d_model, initial_scale=0.25),
+        )
+
+        self.feed_forward_macaron = nn.Sequential(
+            ScaledLinear(d_model, dim_feedforward),
+            ActivationBalancer(channel_dim=-1),
+            DoubleSwish(),
+            nn.Dropout(dropout),
+            ScaledLinear(dim_feedforward, d_model, initial_scale=0.25),
+        )
+
+
+        #add tdnn
+        ## take dmodel dimension and return dmodel dimension?
+        
+        self.tdnn_module = TdnnModule(d_model, d_model)
+
+        # self.conv_module = ConvolutionModule(d_model, cnn_module_kernel)
+
+        self.norm_final = BasicNorm(d_model)
+
+        # try to ensure the output is close to zero-mean (or at least, zero-median).
+        self.balancer = ActivationBalancer(
+            channel_dim=-1, min_positive=0.45, max_positive=0.55, max_abs=6.0
+        )
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self,
+        src: torch.Tensor,
+        pos_emb: torch.Tensor,
+        src_mask: Optional[torch.Tensor] = None,
+        src_key_padding_mask: Optional[torch.Tensor] = None,
+        warmup: float = 1.0,
+    ) -> torch.Tensor:
+        """
+        Pass the input through the encoder layer.
+
+        Args:
+          src:
+            the sequence to the encoder layer of shape (S, N, C) (required).
+          pos_emb:
+            positional embedding tensor of shape (N, 2*S-1, C) (required).
+          src_mask:
+            the mask for the src sequence of shape (S, S) (optional).
+          src_key_padding_mask:
+            the mask for the src keys per batch of shape (N, S) (optional).
+          warmup:
+            controls selective bypass of of layers; if < 1.0, we will
+            bypass layers more frequently.
+
+        Returns:
+            Output tensor of the shape (S, N, C), where
+            S is the source sequence length,
+            N is the batch size,
+            C is the feature number
+        """
+        src_orig = src
+
+        warmup_scale = min(self.bypass_scale + warmup, 1.0)
+        # alpha = 1.0 means fully use this encoder layer, 0.0 would mean
+        # completely bypass it.
+        if self.training:
+            alpha = (
+                warmup_scale
+                if torch.rand(()).item() <= (1.0 - self.layer_dropout)
+                else self.bypass_scale
+            )
+        else:
+            alpha = 1.0
+
+        # macaron style feed forward module
+        src = src + self.dropout(self.feed_forward_macaron(src))
+
+        # multi-headed self-attention module
+        src_att = self.self_attn(
+            src,
+            src,
+            src,
+            pos_emb=pos_emb,
+            attn_mask=src_mask,
+            key_padding_mask=src_key_padding_mask,
+        )[0]
+
+        src = src + self.dropout(src_att)
+
+        # convolution module
+        # src = src + self.dropout(self.conv_module(src))
+
+        # replace convolution module with TDNN
+        # print(src.shape)
+        # print(self.tdnn_module(src).shape)
+        # print(self.dropout(self.tdnn_module(src)).shape)
+        src = src + self.dropout(self.tdnn_module(src))
+
+        # feed forward module
+        src = src + self.dropout(self.feed_forward(src))
+
+        src = self.norm_final(self.balancer(src))
+
+        if alpha != 1.0:
+            src = alpha * src + (1 - alpha) * src_orig
+
+        return src
