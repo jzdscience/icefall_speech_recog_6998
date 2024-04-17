@@ -1407,7 +1407,7 @@ class ConformerEncoderLayerNoConv(nn.Module):
         #add tdnn
         ## take dmodel dimension and return dmodel dimension?
         
-        self.tdnn_module = TdnnModule(d_model, d_model)
+        # self.tdnn_module = TdnnModule(d_model, d_model)
 
         # self.conv_module = ConvolutionModule(d_model, cnn_module_kernel)
 
@@ -1486,7 +1486,7 @@ class ConformerEncoderLayerNoConv(nn.Module):
         # print(src.shape)
         # print(self.tdnn_module(src).shape)
         # print(self.dropout(self.tdnn_module(src)).shape)
-        src = src + self.dropout(self.tdnn_module(src))
+        # src = src + self.dropout(self.tdnn_module(src))
 
         # feed forward module
         src = src + self.dropout(self.feed_forward(src))
