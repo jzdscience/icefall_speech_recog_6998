@@ -50,7 +50,8 @@ class Conformer(Transformer):
         layer_dropout: float = 0.075,
         cnn_module_kernel: int = 31,
         aux_layer_period: int = 3,
-        conv_type: str = 'all_convolution'
+        conv_type: str = 'all_convolution',
+        tdnn_type: str = 'tdnn1',
     ) -> None:
         """
         Args:
@@ -111,6 +112,8 @@ class Conformer(Transformer):
 
         self.conv_type = conv_type
 
+        self.tdnn_type = tdnn_type
+
         # here we switch between different conformer encoder layers
         if self.conv_type == 'all_conv':
           encoder_layer = ConformerEncoderLayer(
@@ -138,6 +141,7 @@ class Conformer(Transformer):
               dropout=dropout,
               layer_dropout=layer_dropout,
               cnn_module_kernel=cnn_module_kernel,
+              tdnn_type=tdnn_type,
           )
 
         # aux_layers from 1/3
@@ -1056,8 +1060,8 @@ class ConvolutionModule(nn.Module):
         return x.permute(2, 0, 1)
 
 
-## adding the TDNN model
-class TdnnModule(nn.Module):
+## adding the TDNN model variants
+class TdnnModule1(nn.Module):
     def __init__(self, num_features: int, output_dim: int):
         """
         Args:
@@ -1068,71 +1072,39 @@ class TdnnModule(nn.Module):
         """
         super().__init__()
 
-        # Note: We don't use paddings inside conv layers
-
-        # version 1: yesno
-        # self.tdnn = nn.Sequential(
-        #     nn.Conv1d(
-        #         in_channels=num_features,
-        #         out_channels=32,
-        #         kernel_size=3,
-        #     ),
-        #     nn.ReLU(inplace=True),
-        #     nn.BatchNorm1d(num_features=32, affine=False),
-        #     nn.Conv1d(
-        #         in_channels=32,
-        #         out_channels=32,
-        #         kernel_size=5,
-        #         dilation=2,
-        #     ),
-        #     nn.ReLU(inplace=True),
-        #     nn.BatchNorm1d(num_features=32, affine=False),
-        #     nn.Conv1d(
-        #         in_channels=32,
-        #         out_channels=32,
-        #         kernel_size=5,
-        #         dilation=4,
-        #     ),
-        #     nn.ReLU(inplace=True),
-        #     nn.BatchNorm1d(num_features=32, affine=False),
-        # )
-
-        # self.output_linear = nn.Linear(in_features=32, out_features=output_dim)
-
-        # version 2: tdnn lstm
         self.tdnn = nn.Sequential(
             nn.Conv1d(
                 in_channels=num_features,
-                out_channels=500,
+                out_channels=512,
                 kernel_size=3,
                 stride=1,
                 padding=1,
             ),
             nn.ReLU(inplace=True),
-            nn.BatchNorm1d(num_features=500, affine=False),
+            nn.BatchNorm1d(num_features=512, affine=False),
             nn.Conv1d(
-                in_channels=500,
-                out_channels=500,
+                in_channels=512,
+                out_channels=512,
                 kernel_size=3,
                 stride=1,
                 dilation=2,
                 padding=2,
             ),
             nn.ReLU(inplace=True),
-            nn.BatchNorm1d(num_features=500, affine=False),
+            nn.BatchNorm1d(num_features=512, affine=False),
             nn.Conv1d(
-                in_channels=500,
-                out_channels=500,
+                in_channels=512,
+                out_channels=512,
                 kernel_size=3,
-                stride=1,  
+                stride=1,
                 dilation=4,
                 padding=4,
             ),
             nn.ReLU(inplace=True),
-            nn.BatchNorm1d(num_features=500, affine=False),
+            nn.BatchNorm1d(num_features=512, affine=False),
         )
 
-        self.output_linear = nn.Linear(in_features=500, out_features=output_dim)
+        self.output_linear = nn.Linear(in_features=512, out_features=output_dim)
 
     def forward(self, 
                 x: torch.Tensor
@@ -1159,13 +1131,237 @@ class TdnnModule(nn.Module):
         x = x.permute(2, 0, 1)  # (N, C, T) -> (T, N, C)
         logits = self.output_linear(x)
 
-        # the first conv layer reduces T by 3-1 frames
-        # the second layer reduces T by (5-1)*2 frames
-        # the second layer reduces T by (5-1)*4 frames
-        # Number of output frames is 2 + 4*2 + 4*4 = 2 + 8 + 16 = 26
-        # x_lens = x_lens - 26
         return logits
 
+class TdnnModule2(nn.Module):
+    def __init__(self, num_features: int, output_dim: int):
+        """
+        Args:
+          num_features:
+            Model input dimension.
+          ouput_dim:
+            Model output dimension
+        """
+        super().__init__()
+
+        # padding to not change T : P=(K-1)/2
+        # padding size considering dilation: P = (K-1)*d/2
+        self.tdnn = nn.Sequential(
+            nn.Conv1d(
+                in_channels=num_features,
+                out_channels=512,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            ),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(num_features=512, affine=False),
+            nn.Conv1d(
+                in_channels=512,
+                out_channels=512,
+                kernel_size=3,
+                stride=1,
+                # dilation=2,
+                padding=1,
+            ),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(num_features=512, affine=False),
+            nn.Conv1d(
+                in_channels=512,
+                out_channels=512,
+                kernel_size=3,
+                stride=1,
+                # dilation=4,
+                padding=1,
+            ),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(num_features=512, affine=False),
+        )
+
+        self.output_linear = nn.Linear(in_features=512, out_features=output_dim)
+
+    def forward(self, 
+                x: torch.Tensor
+                # , x_lens: torch.Tensor
+                ) -> torch.Tensor:
+        """
+        Args:
+          x:
+            The input tensor with shape (T, N, C)
+          x_lens:
+            It contains the number of frames in each utterance in x
+            before padding.
+
+        Returns:
+          Return a tuple with 2 tensors:
+
+            - logits, a tensor of shape (T, N, C)
+            - logit_lens, a tensor of shape (N,)
+        """
+        # x = x.permute(0, 2, 1)  # (N, T, C) -> (N, C, T)
+
+        x = x.permute(1, 2, 0)  # (T, N, C) -> (N, C, T)
+        x = self.tdnn(x)
+        x = x.permute(2, 0, 1)  # (N, C, T) -> (T, N, C)
+        logits = self.output_linear(x)
+
+        return logits
+
+class TdnnModule3(nn.Module):
+    def __init__(self, num_features: int, output_dim: int):
+        """
+        Args:
+          num_features:
+            Model input dimension.
+          ouput_dim:
+            Model output dimension
+        """
+        super().__init__()
+
+        self.tdnn = nn.Sequential(
+            nn.Conv1d(
+                in_channels=num_features,
+                out_channels=512,
+                kernel_size=5,
+                stride=1,
+                padding=1,
+            ),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(num_features=512, affine=False),
+            nn.Conv1d(
+                in_channels=512,
+                out_channels=512,
+                kernel_size=5,
+                stride=1,
+                dilation=2,
+                padding=2,
+            ),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(num_features=512, affine=False),
+            nn.Conv1d(
+                in_channels=512,
+                out_channels=512,
+                kernel_size=5,
+                stride=1,
+                dilation=4,
+                padding=4,
+            ),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(num_features=512, affine=False),
+        )
+
+        self.output_linear = nn.Linear(in_features=512, out_features=output_dim)
+
+    def forward(self, 
+                x: torch.Tensor
+                # , x_lens: torch.Tensor
+                ) -> torch.Tensor:
+        """
+        Args:
+          x:
+            The input tensor with shape (T, N, C)
+          x_lens:
+            It contains the number of frames in each utterance in x
+            before padding.
+
+        Returns:
+          Return a tuple with 2 tensors:
+
+            - logits, a tensor of shape (T, N, C)
+            - logit_lens, a tensor of shape (N,)
+        """
+        # x = x.permute(0, 2, 1)  # (N, T, C) -> (N, C, T)
+
+        x = x.permute(1, 2, 0)  # (T, N, C) -> (N, C, T)
+        x = self.tdnn(x)
+        x = x.permute(2, 0, 1)  # (N, C, T) -> (T, N, C)
+        logits = self.output_linear(x)
+
+        return logits
+
+class TdnnModule4(nn.Module):
+    def __init__(self, num_features: int, output_dim: int):
+        """
+        Args:
+          num_features:
+            Model input dimension.
+          ouput_dim:
+            Model output dimension
+        """
+        super().__init__()
+        # padding to not change T : P=(K-1)/2
+        # padding size considering dilation: P = (K-1)*d/2
+        self.tdnn = nn.Sequential(
+            nn.Conv1d(
+                in_channels=num_features,
+                out_channels=512,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            ),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(num_features=512, affine=False),
+            nn.Conv1d(
+                in_channels=512,
+                out_channels=512,
+                kernel_size=3,
+                stride=1,
+                dilation=2,
+                padding=2,
+            ),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(num_features=512, affine=False),
+            nn.Conv1d(
+                in_channels=512,
+                out_channels=512,
+                kernel_size=3,
+                stride=1,
+                dilation=4,
+                padding=4,
+            ),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(num_features=512, affine=False),
+            nn.Conv1d(
+                in_channels=512,
+                out_channels=512,
+                kernel_size=3,
+                stride=1,
+                dilation=4,
+                padding=4,
+            ),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(num_features=512, affine=False),
+        )
+
+        self.output_linear = nn.Linear(in_features=512, out_features=output_dim)
+
+    def forward(self, 
+                x: torch.Tensor
+                # , x_lens: torch.Tensor
+                ) -> torch.Tensor:
+        """
+        Args:
+          x:
+            The input tensor with shape (T, N, C)
+          x_lens:
+            It contains the number of frames in each utterance in x
+            before padding.
+
+        Returns:
+          Return a tuple with 2 tensors:
+
+            - logits, a tensor of shape (T, N, C)
+            - logit_lens, a tensor of shape (N,)
+        """
+        # x = x.permute(0, 2, 1)  # (N, T, C) -> (N, C, T)
+
+        x = x.permute(1, 2, 0)  # (T, N, C) -> (N, C, T)
+        x = self.tdnn(x)
+        x = x.permute(2, 0, 1)  # (N, C, T) -> (T, N, C)
+        logits = self.output_linear(x)
+
+        return logits
+    
 class ConformerEncoderLayerTDNN(nn.Module):
     """
     ConformerEncoderLayer is made up of self-attn, feedforward and convolution networks.
@@ -1187,6 +1383,7 @@ class ConformerEncoderLayerTDNN(nn.Module):
         bypass_scale: float = 0.1,
         layer_dropout: float = 0.075,
         cnn_module_kernel: int = 31,
+        tdnn_type: str = 'tdnn1'
     ) -> None:
         """
         Args:
@@ -1240,10 +1437,14 @@ class ConformerEncoderLayerTDNN(nn.Module):
 
         #add tdnn
         ## take dmodel dimension and return dmodel dimension?
-        
-        self.tdnn_module = TdnnModule(d_model, d_model)
-
-        # self.conv_module = ConvolutionModule(d_model, cnn_module_kernel)
+        if tdnn_type == 'tdnn1':
+          self.tdnn_module = TdnnModule1(d_model, d_model)
+        elif tdnn_type == 'tdnn2':
+          self.tdnn_module = TdnnModule2(d_model, d_model)
+        elif tdnn_type == 'tdnn3':
+          self.tdnn_module = TdnnModule3(d_model, d_model)
+        elif tdnn_type == 'tdnn4':
+          self.tdnn_module = TdnnModule4(d_model, d_model)
 
         self.norm_final = BasicNorm(d_model)
 
@@ -1403,14 +1604,6 @@ class ConformerEncoderLayerNoConv(nn.Module):
             ScaledLinear(dim_feedforward, d_model, initial_scale=0.25),
         )
 
-
-        #add tdnn
-        ## take dmodel dimension and return dmodel dimension?
-        
-        # self.tdnn_module = TdnnModule(d_model, d_model)
-
-        # self.conv_module = ConvolutionModule(d_model, cnn_module_kernel)
-
         self.norm_final = BasicNorm(d_model)
 
         # try to ensure the output is close to zero-mean (or at least, zero-median).
@@ -1478,15 +1671,6 @@ class ConformerEncoderLayerNoConv(nn.Module):
         )[0]
 
         src = src + self.dropout(src_att)
-
-        # convolution module
-        # src = src + self.dropout(self.conv_module(src))
-
-        # replace convolution module with TDNN
-        # print(src.shape)
-        # print(self.tdnn_module(src).shape)
-        # print(self.dropout(self.tdnn_module(src)).shape)
-        # src = src + self.dropout(self.tdnn_module(src))
 
         # feed forward module
         src = src + self.dropout(self.feed_forward(src))

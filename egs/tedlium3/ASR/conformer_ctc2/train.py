@@ -287,9 +287,17 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--conv-type",
         type=str,
-        default="all_conv",
-        choices=["all_conv", "no_conv", "all_tdnn"],
+        default="all_tdnn",
+        choices=["all_conv", "no_conv", "all_tdnn", "c_c_c_t", "c_c_t_t"],
         help="""it specifies the type of convolution used in the individual conformer block.
+        """,
+    )
+
+    parser.add_argument(
+        "--tdnn-type",
+        type=str,
+        default="tdnn1",
+        help="""it specifies the variant of tdnn used in the individual conformer block. like kernel size, dilation, etc.
         """,
     )
 
@@ -880,7 +888,8 @@ def run(rank, world_size, args):
         dim_feedforward=params.dim_feedforward,
         num_encoder_layers=params.num_encoder_layers,
         num_decoder_layers=params.num_decoder_layers,
-        conv_type=params.conv_type
+        conv_type=params.conv_type,
+        tdnn_type=params.tdnn_type
     )
 
     num_param = sum([p.numel() for p in model.parameters()])
