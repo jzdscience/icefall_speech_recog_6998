@@ -1404,16 +1404,6 @@ class TdnnModule5(nn.Module):
             ),
             nn.ReLU(inplace=True),
             nn.BatchNorm1d(num_features=128, affine=False),
-            nn.Conv1d(
-                in_channels=128,
-                out_channels=128,
-                kernel_size=3,
-                stride=1,
-                dilation=4,
-                padding=4,
-            ),
-            nn.ReLU(inplace=True),
-            nn.BatchNorm1d(num_features=128, affine=False),
         )
 
         self.output_linear = nn.Linear(in_features=128, out_features=output_dim)
