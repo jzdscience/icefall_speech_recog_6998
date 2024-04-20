@@ -288,7 +288,7 @@ def get_parser() -> argparse.ArgumentParser:
         "--conv-type",
         type=str,
         default="all_tdnn",
-        choices=["all_conv", "no_conv", "all_tdnn", "c_c_c_t", "c_c_t_t"],
+        choices=["all_conv", "no_conv", "all_tdnn", "all_tdnn_no_skip", "c_c_c_t", "c_c_t_t"],
         help="""it specifies the type of convolution used in the individual conformer block.
         """,
     )

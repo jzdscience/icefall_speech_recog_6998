@@ -186,6 +186,23 @@ def get_parser() -> argparse.ArgumentParser:
         help="Directory to store results.",
     )
 
+    parser.add_argument(
+        "--conv-type",
+        type=str,
+        default="all_tdnn",
+        choices=["all_conv", "no_conv", "all_tdnn", "all_tdnn_no_skip", "c_c_c_t", "c_c_t_t"],
+        help="""it specifies the type of convolution used in the individual conformer block.
+        """,
+    )
+
+    parser.add_argument(
+        "--tdnn-type",
+        type=str,
+        default="tdnn1",
+        help="""it specifies the variant of tdnn used in the individual conformer block. like kernel size, dilation, etc.
+        """,
+    )
+
     add_model_arguments(parser)
 
     return parser
@@ -763,6 +780,8 @@ def main() -> None:
         dim_feedforward=params.dim_feedforward,
         num_encoder_layers=params.num_encoder_layers,
         num_decoder_layers=params.num_decoder_layers,
+        conv_type=params.conv_type,
+        tdnn_type=params.tdnn_type
     )
 
     if not params.use_averaged_model:
