@@ -23,6 +23,7 @@ from typing import List, Optional, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from combiner import RandomCombine
 from scaling import (
     ActivationBalancer,
@@ -116,7 +117,7 @@ class Conformer(Transformer):
 
         # here we switch between different conformer encoder layers
         if self.conv_type == 'all_conv':
-          encoder_layer = ConformerEncoderLayer(
+          encoder_layer = ConformerEncoderLayerConv(
               d_model=d_model,
               nhead=nhead,
               dim_feedforward=dim_feedforward,
@@ -143,19 +144,61 @@ class Conformer(Transformer):
               cnn_module_kernel=cnn_module_kernel,
               tdnn_type=tdnn_type,
           )
+        elif self.conv_type == 'all_tdnn_no_skip':
+          encoder_layer = ConformerEncoderLayerTDNNNoSkip(
+              d_model=d_model,
+              nhead=nhead,
+              dim_feedforward=dim_feedforward,
+              dropout=dropout,
+              layer_dropout=layer_dropout,
+              cnn_module_kernel=cnn_module_kernel,
+          )
+        elif self.conv_type in ["c_c_c_t", "t_c_c_c" "c_c_t_t", "t_t_c_c"]:
+          encoder_layer_conv = ConformerEncoderLayerConv(
+              d_model=d_model,
+              nhead=nhead,
+              dim_feedforward=dim_feedforward,
+              dropout=dropout,
+              layer_dropout=layer_dropout,
+              cnn_module_kernel=cnn_module_kernel,
+          )
+          encoder_layer_tdnn = ConformerEncoderLayerTDNN(
+              d_model=d_model,
+              nhead=nhead,
+              dim_feedforward=dim_feedforward,
+              dropout=dropout,
+              layer_dropout=layer_dropout,
+              cnn_module_kernel=cnn_module_kernel,
+              tdnn_type=tdnn_type,
+          )
 
-        # aux_layers from 1/3
-        self.encoder = ConformerEncoder(
-            encoder_layer=encoder_layer,
-            num_layers=num_encoder_layers,
-            aux_layers=list(
-                range(
-                    num_encoder_layers // 3,
-                    num_encoder_layers - 1,
-                    aux_layer_period,
-                )
-            ),
-        )
+        if self.conv_type in ["all_conv", "no_conv", "all_tdnn", "all_tdnn_no_skip"]:
+          # aux_layers from 1/3
+          self.encoder = ConformerEncoder(
+              encoder_layer=encoder_layer,
+              num_layers=num_encoder_layers,
+              aux_layers=list(
+                  range(
+                      num_encoder_layers // 3,
+                      num_encoder_layers - 1,
+                      aux_layer_period,
+                  )
+              ),
+          )
+        elif self.conv_type in ["c_c_c_t", "t_c_c_c" "c_c_t_t", "t_t_c_c"]:
+          self.encoder = ConformerConvTDNNMixedEncoder(
+              encoder_layer_conv=encoder_layer_conv,
+              encoder_layer_tdnn=encoder_layer_tdnn,
+              num_layers=num_encoder_layers,
+              aux_layers=list(
+                  range(
+                      num_encoder_layers // 3,
+                      num_encoder_layers - 1,
+                      aux_layer_period,
+                  )
+              ),
+              conv_type=self.conv_type
+          )
 
     def run_encoder(
         self,
@@ -197,7 +240,7 @@ class Conformer(Transformer):
         return x, mask
 
 
-class ConformerEncoderLayer(nn.Module):
+class ConformerEncoderLayerConv(nn.Module):
     """
     ConformerEncoderLayer is made up of self-attn, feedforward and convolution networks.
     See: "Conformer: Convolution-augmented Transformer for Speech Recognition"
@@ -369,6 +412,109 @@ class ConformerEncoder(nn.Module):
         encoder_layer: nn.Module,
         num_layers: int,
         aux_layers: List[int],
+    ) -> None:
+
+        """
+        Args:
+          encoder_layer:
+            an instance of the ConformerEncoderLayer() class (required).
+          num_layers:
+            the number of sub-encoder-layers in the encoder (required).
+          aux_layers:
+            list of indexes of sub-encoder-layers outputs to be combined (required).
+        """
+
+        super().__init__()
+        self.layers = nn.ModuleList(
+            [copy.deepcopy(encoder_layer) for i in range(num_layers)]
+        )
+        self.num_layers = num_layers
+
+        assert len(set(aux_layers)) == len(aux_layers)
+
+        assert num_layers - 1 not in aux_layers
+        self.aux_layers = aux_layers + [num_layers - 1]
+
+        self.combiner = RandomCombine(
+            num_inputs=len(self.aux_layers),
+            final_weight=0.5,
+            pure_prob=0.333,
+            stddev=2.0,
+        )
+
+    def forward(
+        self,
+        src: torch.Tensor,
+        pos_emb: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+        src_key_padding_mask: Optional[torch.Tensor] = None,
+        warmup: float = 1.0,
+    ) -> torch.Tensor:
+        """
+        Pass the input through the encoder layers in turn.
+
+        Args:
+          src:
+            the sequence to the encoder of shape (S, N, C) (required).
+          pos_emb:
+            positional embedding tensor of shape (N, 2*S-1, C) (required).
+          mask:
+            the mask for the src sequence of shape (S, S) (optional).
+          src_key_padding_mask:
+            the mask for the src keys per batch of shape (N, S) (optional).
+          warmup:
+            controls selective bypass of layer; if < 1.0, we will
+            bypass the layer more frequently (default=1.0).
+
+        Returns:
+          Output tensor of the shape (S, N, C), where
+          S is the source sequence length,
+          N is the batch size,
+          C is the feature number.
+
+        """
+        output = src
+
+        outputs = []
+        for i, mod in enumerate(self.layers):
+            output = mod(
+                output,
+                pos_emb,
+                src_mask=mask,
+                src_key_padding_mask=src_key_padding_mask,
+                warmup=warmup,
+            )
+
+            if i in self.aux_layers:
+                outputs.append(output)
+
+        output = self.combiner(outputs)
+
+        return output
+
+####################
+#WIP #################
+
+######################
+class ConformerConvTDNNMixedEncoder(nn.Module):
+    """
+    ConformerEncoder is a stack of N encoder layers
+
+    Examples:
+        >>> encoder_layer = ConformerEncoderLayer(d_model=512, nhead=8)
+        >>> conformer_encoder = ConformerEncoder(encoder_layer, num_layers=6)
+        >>> src = torch.rand(10, 32, 512)
+        >>> pos_emb = torch.rand(32, 19, 512)
+        >>> out = conformer_encoder(src, pos_emb)
+    """
+
+    def __init__(
+        self,
+        encoder_layer_conv: nn.Module,
+        encoder_layer_tdnn: nn.Module,
+        num_layers: int,
+        aux_layers: List[int],
+        conv_type: str
     ) -> None:
 
         """
@@ -1059,11 +1205,44 @@ class ConvolutionModule(nn.Module):
 
         return x.permute(2, 0, 1)
 
+## add local statistics pooling layer
+class LocalStatisticsPooling(nn.Module):
+    def __init__(self, window_size):
+        super(LocalStatisticsPooling, self).__init__()
+        self.window_size = window_size
 
+    def forward(self, x):
+        # x: (batch_size, features, time_steps)
+        batch_size, features, time_steps = x.shape
+        
+        # Using padding to maintain the temporal dimension
+        padding = self.window_size // 2  # For even window size, adjust padding if needed
+        x_padded = F.pad(x, (padding, padding), mode='constant', value=0)
+        
+        # Initialize outputs
+        pooled_means = torch.zeros_like(x)
+        pooled_stds = torch.zeros_like(x)
+        
+        # Apply window to each time step
+        for i in range(time_steps):
+            start = i
+            end = i + self.window_size
+            window = x_padded[:, :, start:end]
+            mean = window.mean(dim=2, keepdim=True)
+            std = window.std(dim=2, unbiased=False, keepdim=True)
+            pooled_means[:, :, i] = mean.squeeze(2)
+            pooled_stds[:, :, i] = std.squeeze(2)
+
+        # Concatenate means and standard deviations along the feature dimension
+        pooled = torch.cat((pooled_means, pooled_stds), dim=1)
+        return pooled
+    
 ## adding the TDNN model variants
 class TdnnModule1(nn.Module):
     def __init__(self, num_features: int, output_dim: int):
         """
+        Default TDNN network, adapted from icefall's librispeech tdnn_lstm_ctc (with 512 channels instead 3, no stride (subsampling) in the last layer, and no LSTMs)
+
         Args:
           num_features:
             Model input dimension.
@@ -1136,6 +1315,8 @@ class TdnnModule1(nn.Module):
 class TdnnModule2(nn.Module):
     def __init__(self, num_features: int, output_dim: int):
         """
+        This TDNN variant is based on TDNN1, but test the effect of removing dilation
+
         Args:
           num_features:
             Model input dimension.
@@ -1210,6 +1391,9 @@ class TdnnModule2(nn.Module):
 class TdnnModule3(nn.Module):
     def __init__(self, num_features: int, output_dim: int):
         """
+        This TDNN variant is based on TDNN1, but test the effect of larger size of kernel (5 instead of 3)
+
+
         Args:
           num_features:
             Model input dimension.
@@ -1282,6 +1466,9 @@ class TdnnModule3(nn.Module):
 class TdnnModule4(nn.Module):
     def __init__(self, num_features: int, output_dim: int):
         """
+        This TDNN variant is based on TDNN1, but test the effect of additional layer (4 layers in total)
+
+
         Args:
           num_features:
             Model input dimension.
@@ -1365,6 +1552,8 @@ class TdnnModule4(nn.Module):
 class TdnnModule5(nn.Module):
     def __init__(self, num_features: int, output_dim: int):
         """
+        This TDNN variant is based on TDNN1, but test the effect of smaller conv channels
+
         Args:
           num_features:
             Model input dimension.
@@ -1434,7 +1623,258 @@ class TdnnModule5(nn.Module):
         logits = self.output_linear(x)
 
         return logits
-        
+
+## adding the TDNN model variants
+class TdnnModule6(nn.Module):
+    def __init__(self, num_features: int, output_dim: int):
+        """
+        This TDNN variant is based on TDNN2 (3layer, no dilation, kernel size 3), but it uses the DoubleSwish activation function.
+
+        Args:
+          num_features:
+            Model input dimension.
+          ouput_dim:
+            Model output dimension
+        """
+        super().__init__()
+
+        self.tdnn = nn.Sequential(
+            nn.Conv1d(
+                in_channels=num_features,
+                out_channels=512,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            ),
+            DoubleSwish(),
+            nn.BatchNorm1d(num_features=512, affine=False),
+            nn.Conv1d(
+                in_channels=512,
+                out_channels=512,
+                kernel_size=3,
+                stride=1,
+                padding=1
+                # dilation=2,
+                # padding=2,
+            ),
+            DoubleSwish(),
+            nn.BatchNorm1d(num_features=512, affine=False),
+            nn.Conv1d(
+                in_channels=512,
+                out_channels=512,
+                kernel_size=3,
+                stride=1,
+                padding=1
+                # dilation=4,
+                # padding=4,
+            ),
+            DoubleSwish(),
+            nn.BatchNorm1d(num_features=512, affine=False),
+        )
+
+        self.output_linear = nn.Linear(in_features=512, out_features=output_dim)
+
+    def forward(self, 
+                x: torch.Tensor
+                # , x_lens: torch.Tensor
+                ) -> torch.Tensor:
+        """
+        Args:
+          x:
+            The input tensor with shape (T, N, C)
+          x_lens:
+            It contains the number of frames in each utterance in x
+            before padding.
+
+        Returns:
+          Return a tuple with 2 tensors:
+
+            - logits, a tensor of shape (T, N, C)
+            - logit_lens, a tensor of shape (N,)
+        """
+        # x = x.permute(0, 2, 1)  # (N, T, C) -> (N, C, T)
+
+        x = x.permute(1, 2, 0)  # (T, N, C) -> (N, C, T)
+        x = self.tdnn(x)
+        x = x.permute(2, 0, 1)  # (N, C, T) -> (T, N, C)
+        logits = self.output_linear(x)
+
+        return logits
+    
+class TdnnModule7(nn.Module):
+    def __init__(self, num_features: int, output_dim: int):
+        """
+        This TDNN variation introduced the statspooling layer after TDNN layers. before feeding to the linear layer.
+
+        Args:
+          num_features:
+            Model input dimension.
+          ouput_dim:
+            Model output dimension
+        """
+        super().__init__()
+
+        self.tdnn = nn.Sequential(
+            nn.Conv1d(
+                in_channels=num_features,
+                out_channels=512,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            ),
+            DoubleSwish(),
+            nn.BatchNorm1d(num_features=512, affine=False),
+            nn.Conv1d(
+                in_channels=512,
+                out_channels=512,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                # dilation=2,
+                # padding=2,
+            ),
+            DoubleSwish(),
+            nn.BatchNorm1d(num_features=512, affine=False),
+            nn.Conv1d(
+                in_channels=512,
+                out_channels=512,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                # dilation=4,
+                # padding=4,
+            ),
+            DoubleSwish(),
+            nn.BatchNorm1d(num_features=512, affine=False),
+        )
+
+
+        self.stats_pooling = nn.Sequential(
+            LocalStatisticsPooling(window_size=5),
+            nn.BatchNorm1d(num_features = 512*2, affine=False),  # Adjusted to handle doubled feature size
+            nn.Dropout(0.1),
+            DoubleSwish(),
+        )
+
+        self.output_linear = nn.Linear(in_features=512*2, out_features=output_dim)
+
+    def forward(self, 
+                x: torch.Tensor
+                # , x_lens: torch.Tensor
+                ) -> torch.Tensor:
+        """
+        Args:
+          x:
+            The input tensor with shape (T, N, C)
+          x_lens:
+            It contains the number of frames in each utterance in x
+            before padding.
+
+        Returns:
+          Return a tuple with 2 tensors:
+
+            - logits, a tensor of shape (T, N, C)
+            - logit_lens, a tensor of shape (N,)
+        """
+        # x = x.permute(0, 2, 1)  # (N, T, C) -> (N, C, T)
+
+        x = x.permute(1, 2, 0)  # (T, N, C) -> (N, C, T)
+        x = self.tdnn(x)
+        x = self.stats_pooling(x) 
+        # x = x.permute(0, 2, 1)  # (N, C, T) to (N, T, C) for BatchNorm
+        # print(x.shape)
+        # x = self.batch_norm(x)
+        # x = x.permute(0, 2, 1)  # (N, T, C) back to (N, C, T)
+        # print(x.shape)
+        # Apply dropout
+        # x = self.dropout(x)
+        # print(x.shape)
+        # Apply ReLU activation
+        # x = self.activation(x)
+        # print(x.shape)
+
+        x = x.permute(2, 0, 1)  # (N, C, T) -> (T, N, C)
+        logits = self.output_linear(x)
+        # print(logits.shape)
+
+        return logits
+
+class TdnnModule8(nn.Module):
+    def __init__(self, num_features: int, output_dim: int):
+        """
+        This TDNN variant is based on TDNN6 (3layer, no dilation, kernel size 3, Double swish, but use smaller conv channels to match parameter size with conv)
+
+        Args:
+          num_features:
+            Model input dimension.
+          ouput_dim:
+            Model output dimension
+        """
+        super().__init__()
+
+        self.tdnn = nn.Sequential(
+            nn.Conv1d(
+                in_channels=num_features,
+                out_channels=176,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            ),
+            DoubleSwish(),
+            nn.BatchNorm1d(num_features=176, affine=False),
+            nn.Conv1d(
+                in_channels=176,
+                out_channels=176,
+                kernel_size=3,
+                stride=1,
+                padding=1
+                # dilation=2,
+                # padding=2,
+            ),
+            DoubleSwish(),
+            nn.BatchNorm1d(num_features=176, affine=False),
+            nn.Conv1d(
+                in_channels=176,
+                out_channels=176,
+                kernel_size=3,
+                stride=1,
+                padding=1
+                # dilation=4,
+                # padding=4,
+            ),
+            DoubleSwish(),
+            nn.BatchNorm1d(num_features=176, affine=False),
+        )
+
+        self.output_linear = nn.Linear(in_features=176, out_features=output_dim)
+
+    def forward(self, 
+                x: torch.Tensor
+                # , x_lens: torch.Tensor
+                ) -> torch.Tensor:
+        """
+        Args:
+          x:
+            The input tensor with shape (T, N, C)
+          x_lens:
+            It contains the number of frames in each utterance in x
+            before padding.
+
+        Returns:
+          Return a tuple with 2 tensors:
+
+            - logits, a tensor of shape (T, N, C)
+            - logit_lens, a tensor of shape (N,)
+        """
+        # x = x.permute(0, 2, 1)  # (N, T, C) -> (N, C, T)
+
+        x = x.permute(1, 2, 0)  # (T, N, C) -> (N, C, T)
+        x = self.tdnn(x)
+        x = x.permute(2, 0, 1)  # (N, C, T) -> (T, N, C)
+        logits = self.output_linear(x)
+
+        return logits
+
 class ConformerEncoderLayerTDNN(nn.Module):
     """
     ConformerEncoderLayer is made up of self-attn, feedforward and convolution networks.
@@ -1525,6 +1965,15 @@ class ConformerEncoderLayerTDNN(nn.Module):
         elif tdnn_type == 'tdnn5':
           # variation in conv channel size
           self.tdnn_module = TdnnModule5(d_model, d_model)
+        elif tdnn_type == 'tdnn6':
+          # variation in conv channel size
+          self.tdnn_module = TdnnModule6(d_model, d_model)
+        elif tdnn_type == 'tdnn7':
+          # variation in conv channel size
+          self.tdnn_module = TdnnModule7(d_model, d_model)
+        elif tdnn_type == 'tdnn8':
+          # variation in conv channel size
+          self.tdnn_module = TdnnModule8(d_model, d_model)
 
         self.norm_final = BasicNorm(d_model)
 
@@ -1613,6 +2062,186 @@ class ConformerEncoderLayerTDNN(nn.Module):
 
         return src
 
+class ConformerEncoderLayerTDNNNoSkip(nn.Module):
+    """
+    ConformerEncoderLayer is made up of self-attn, feedforward and convolution networks.
+    See: "Conformer: Convolution-augmented Transformer for Speech Recognition"
+
+    Examples:
+        >>> encoder_layer = ConformerEncoderLayer(d_model=512, nhead=8)
+        >>> src = torch.rand(10, 32, 512)
+        >>> pos_emb = torch.rand(32, 19, 512)
+        >>> out = encoder_layer(src, pos_emb)
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        bypass_scale: float = 0.1,
+        layer_dropout: float = 0.075,
+        cnn_module_kernel: int = 31,
+        tdnn_type: str = 'tdnn1'
+    ) -> None:
+        """
+        Args:
+          d_model:
+            the number of expected features in the input (required).
+          nhead:
+            the number of heads in the multiheadattention models (required).
+          dim_feedforward:
+            the dimension of the feedforward network model (default=2048).
+          dropout:
+            the dropout value (default=0.1).
+          bypass_scale:
+            a scale on the layer's output, used in bypass (resnet-type) skip-connection;
+            when the layer is bypassed the final output will be a
+            weighted sum of the layer's input and layer's output with weights
+            (1.0-bypass_scale) and bypass_scale correspondingly (default=0.1).
+          layer_dropout:
+            the probability to bypass the layer (default=0.075).
+          cnn_module_kernel (int):
+            kernel size of convolution module (default=31).
+        """
+        super().__init__()
+
+        if bypass_scale < 0.0 or bypass_scale > 1.0:
+            raise ValueError("bypass_scale should be between 0.0 and 1.0")
+
+        if layer_dropout < 0.0 or layer_dropout > 1.0:
+            raise ValueError("layer_dropout should be between 0.0 and 1.0")
+
+        self.bypass_scale = bypass_scale
+        self.layer_dropout = layer_dropout
+
+        self.self_attn = RelPositionMultiheadAttention(d_model, nhead, dropout=0.0)
+
+        self.feed_forward = nn.Sequential(
+            ScaledLinear(d_model, dim_feedforward),
+            ActivationBalancer(channel_dim=-1),
+            DoubleSwish(),
+            nn.Dropout(dropout),
+            ScaledLinear(dim_feedforward, d_model, initial_scale=0.25),
+        )
+
+        self.feed_forward_macaron = nn.Sequential(
+            ScaledLinear(d_model, dim_feedforward),
+            ActivationBalancer(channel_dim=-1),
+            DoubleSwish(),
+            nn.Dropout(dropout),
+            ScaledLinear(dim_feedforward, d_model, initial_scale=0.25),
+        )
+
+
+        #add tdnn
+        ## take dmodel dimension and return dmodel dimension?
+        if tdnn_type == 'tdnn1':
+          # default
+          self.tdnn_module = TdnnModule1(d_model, d_model)
+        elif tdnn_type == 'tdnn2':
+          # variation in dilation or not
+          self.tdnn_module = TdnnModule2(d_model, d_model)
+        elif tdnn_type == 'tdnn3':
+          # variation in kernel size
+          self.tdnn_module = TdnnModule3(d_model, d_model)
+        elif tdnn_type == 'tdnn4':
+          # variation in layers of tdnn
+          self.tdnn_module = TdnnModule4(d_model, d_model)
+        elif tdnn_type == 'tdnn5':
+          # variation in conv channel size
+          self.tdnn_module = TdnnModule5(d_model, d_model)
+        elif tdnn_type == 'tdnn6':
+          # variation in conv channel size
+          self.tdnn_module = TdnnModule6(d_model, d_model)
+        elif tdnn_type == 'tdnn7':
+          # variation in conv channel size
+          self.tdnn_module = TdnnModule7(d_model, d_model)
+        elif tdnn_type == 'tdnn8':
+          # variation in conv channel size
+          self.tdnn_module = TdnnModule8(d_model, d_model)
+
+        self.norm_final = BasicNorm(d_model)
+
+        # try to ensure the output is close to zero-mean (or at least, zero-median).
+        self.balancer = ActivationBalancer(
+            channel_dim=-1, min_positive=0.45, max_positive=0.55, max_abs=6.0
+        )
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self,
+        src: torch.Tensor,
+        pos_emb: torch.Tensor,
+        src_mask: Optional[torch.Tensor] = None,
+        src_key_padding_mask: Optional[torch.Tensor] = None,
+        warmup: float = 1.0,
+    ) -> torch.Tensor:
+        """
+        Pass the input through the encoder layer.
+
+        Args:
+          src:
+            the sequence to the encoder layer of shape (S, N, C) (required).
+          pos_emb:
+            positional embedding tensor of shape (N, 2*S-1, C) (required).
+          src_mask:
+            the mask for the src sequence of shape (S, S) (optional).
+          src_key_padding_mask:
+            the mask for the src keys per batch of shape (N, S) (optional).
+          warmup:
+            controls selective bypass of of layers; if < 1.0, we will
+            bypass layers more frequently.
+
+        Returns:
+            Output tensor of the shape (S, N, C), where
+            S is the source sequence length,
+            N is the batch size,
+            C is the feature number
+        """
+        src_orig = src
+
+        warmup_scale = min(self.bypass_scale + warmup, 1.0)
+        # alpha = 1.0 means fully use this encoder layer, 0.0 would mean
+        # completely bypass it.
+        if self.training:
+            alpha = (
+                warmup_scale
+                if torch.rand(()).item() <= (1.0 - self.layer_dropout)
+                else self.bypass_scale
+            )
+        else:
+            alpha = 1.0
+
+        # macaron style feed forward module
+        src = src + self.dropout(self.feed_forward_macaron(src))
+
+        # multi-headed self-attention module
+        src_att = self.self_attn(
+            src,
+            src,
+            src,
+            pos_emb=pos_emb,
+            attn_mask=src_mask,
+            key_padding_mask=src_key_padding_mask,
+        )[0]
+
+        src = src + self.dropout(src_att)
+
+        src = self.dropout(self.tdnn_module(src))
+
+        # feed forward module
+        src = src + self.dropout(self.feed_forward(src))
+
+        src = self.norm_final(self.balancer(src))
+
+        if alpha != 1.0:
+            src = alpha * src + (1 - alpha) * src_orig
+
+        return src
+    
 class ConformerEncoderLayerNoConv(nn.Module):
     """
     ConformerEncoderLayer is made up of self-attn, feedforward and convolution networks.
@@ -1761,3 +2390,5 @@ class ConformerEncoderLayerNoConv(nn.Module):
             src = alpha * src + (1 - alpha) * src_orig
 
         return src
+
+
