@@ -153,7 +153,7 @@ class Conformer(Transformer):
               layer_dropout=layer_dropout,
               cnn_module_kernel=cnn_module_kernel,
           )
-        elif self.conv_type in ["c_c_c_t", "t_c_c_c" "c_c_t_t", "t_t_c_c"]:
+        elif self.conv_type in ["c_c_t_t", "t_t_c_c", "c_t_t_c", "t_c_c_t"]:
           encoder_layer_conv = ConformerEncoderLayerConv(
               d_model=d_model,
               nhead=nhead,
@@ -185,7 +185,7 @@ class Conformer(Transformer):
                   )
               ),
           )
-        elif self.conv_type in ["c_c_c_t", "t_c_c_c" "c_c_t_t", "t_t_c_c"]:
+        elif self.conv_type in ["c_c_t_t", "t_t_c_c", "c_t_t_c", "t_c_c_t"]:
           self.encoder = ConformerConvTDNNMixedEncoder(
               encoder_layer_conv=encoder_layer_conv,
               encoder_layer_tdnn=encoder_layer_tdnn,
@@ -528,9 +528,27 @@ class ConformerConvTDNNMixedEncoder(nn.Module):
         """
 
         super().__init__()
-        self.layers = nn.ModuleList(
-            [copy.deepcopy(encoder_layer) for i in range(num_layers)]
-        )
+        # self.layers = nn.ModuleList(
+        #     [copy.deepcopy(encoder_layer) for i in range(num_layers)]
+        # )
+        if conv_type == "c_c_t_t":
+          self.layers = nn.ModuleList(
+              [copy.deepcopy(encoder_layer_conv) for i in range(2)] + [copy.deepcopy(encoder_layer_tdnn) for i in range(2)]
+          )
+        elif conv_type == "t_t_c_c":
+          self.layers = nn.ModuleList(
+              # [copy.deepcopy(encoder_layer_tdnn) for i in range(2)] + [copy.deepcopy(encoder_layer_conv) for i in range(2)]
+              [copy.deepcopy(encoder_layer_tdnn)] + [copy.deepcopy(encoder_layer_tdnn)] + [copy.deepcopy(encoder_layer_conv)] + [copy.deepcopy(encoder_layer_conv)]
+          )
+        elif conv_type == "c_t_t_c":
+          self.layers = nn.ModuleList(
+              [copy.deepcopy(encoder_layer_conv) for i in range(1)] + [copy.deepcopy(encoder_layer_tdnn) for i in range(2)] + [copy.deepcopy(encoder_layer_conv) for i in range(1)]
+          )
+        elif conv_type == "t_c_c_t":
+          self.layers = nn.ModuleList(
+              [copy.deepcopy(encoder_layer_tdnn) for i in range(1)] + [copy.deepcopy(encoder_layer_conv) for i in range(2)] + [copy.deepcopy(encoder_layer_tdnn) for i in range(1)]
+          )
+
         self.num_layers = num_layers
 
         assert len(set(aux_layers)) == len(aux_layers)
