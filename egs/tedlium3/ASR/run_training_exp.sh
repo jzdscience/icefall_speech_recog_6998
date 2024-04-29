@@ -4,10 +4,10 @@
 world_size=`nvidia-smi  -L | wc -l`
 
 ## baseline: all conv
-#./conformer_ctc2/train.py --world-size 4 --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_test --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_conv
+# ./conformer_ctc2/train.py --world-size $world_size --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_all_conv_gcp --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_conv
 
 ## baseline: no conv/tdnn at all
-#./conformer_ctc2/train.py --world-size 4 --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_no_conv --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type no_conv
+#./conformer_ctc2/train.py --world-size $world_size --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_no_conv --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type no_conv
 
 ## Variation on TDNN structure
 ### TDNN1 (512 3k 0d -  512 3k 2d - 512 3k 4d)
@@ -29,23 +29,23 @@ world_size=`nvidia-smi  -L | wc -l`
 # ./conformer_ctc2/train.py --world-size $world_size --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_all_tdnn_tdnn6 --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn --tdnn-type tdnn6
 
 ### TDNN7 (512 3k 0d -  512 3k 0d - 512 3k 0d - Statspooling - Double Swish)
-./conformer_ctc2/train.py --world-size $world_size --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_all_tdnn_tdnn7 --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn --tdnn-type tdnn7
+# ./conformer_ctc2/train.py --world-size $world_size --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_all_tdnn_tdnn7 --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn --tdnn-type tdnn7
 
 ### TDNN2NoSKIP (512 3k 0d -  512 3k 0d - 512 3k 0d )
-./conformer_ctc2/train.py --world-size $world_size --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_all_tdnn_tdnn2_noskip --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn_no_skip --tdnn-type tdnn2
+# ./conformer_ctc2/train.py --world-size $world_size --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_all_tdnn_tdnn2_noskip --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn_no_skip --tdnn-type tdnn2
 
 ### TDNN8 (176 3k 0d -  176 3k 0d - 176  3k 0d - Double Swish)
-./conformer_ctc2/train.py --world-size $world_size --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_all_tdnn_tdnn8 --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn --tdnn-type tdnn8
+# ./conformer_ctc2/train.py --world-size $world_size --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_all_tdnn_tdnn8 --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn --tdnn-type tdnn8
 
 ### Conv_TDNN8 (c-c-t-t)
-./conformer_ctc2/train.py --world-size $world_size --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_tdnn8_conv_c_c_t_t --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type c_c_t_t --tdnn-type tdnn8
+# ./conformer_ctc2/train.py --world-size $world_size --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_tdnn8_conv_c_c_t_t --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type c_c_t_t --tdnn-type tdnn8
 
 ### Conv_TDNN8 (t-t-c-c)
-./conformer_ctc2/train.py --world-size $world_size  --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_tdnn8_conv_t_t_c_c --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type t_t_c_c --tdnn-type tdnn8
+# ./conformer_ctc2/train.py --world-size $world_size  --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_tdnn8_conv_t_t_c_c --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type t_t_c_c --tdnn-type tdnn8
 
 ### Conv_TDNN8 (c-t-t-c)
-./conformer_ctc2/train.py --world-size $world_size  --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_tdnn8_conv_c_t_t_c --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type c_t_t_c --tdnn-type tdnn8
+# ./conformer_ctc2/train.py --world-size $world_size  --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_tdnn8_conv_c_t_t_c --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type c_t_t_c --tdnn-type tdnn8
 
 ### Conv_TDNN8 (t-c-c-t)
-./conformer_ctc2/train.py --world-size $world_size  --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_tdnn8_conv_t_c_c_t --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type t_c_c_t --tdnn-type tdnn8
+# ./conformer_ctc2/train.py --world-size $world_size  --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_tdnn8_conv_t_c_c_t --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type t_c_c_t --tdnn-type tdnn8
 

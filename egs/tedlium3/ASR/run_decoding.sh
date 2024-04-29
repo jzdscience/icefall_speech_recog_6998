@@ -4,7 +4,7 @@
 world_size=`nvidia-smi  -L | wc -l`
 
 ## baseline: all conv
-#  ./conformer_ctc2/decode.py --epoch 30  --exp-dir ./conformer_ctc2/exps/exp_all_conv --result-dir ./conformer_ctc2/exps/exp_all_conv  --max-duration 400 --method ctc-decoding --use-averaged-model True --avg 5 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_conv
+ ./conformer_ctc2/decode.py --epoch 30  --exp-dir ./conformer_ctc2/exps/exp_all_conv_gcp --result-dir ./conformer_ctc2/exps/exp_all_conv_gcp  --max-duration 400 --method ctc-decoding --use-averaged-model True --avg 5 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_conv
 
 
 ## baseline: no conv/tdnn at all
@@ -30,8 +30,8 @@ world_size=`nvidia-smi  -L | wc -l`
 ### TDNN6 (512 3k 0d -  512 3k 0d - 512 3k 0d - Double Swish)
 #  ./conformer_ctc2/decode.py --epoch 30  --exp-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn6 --result-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn6  --max-duration 400 --method ctc-decoding --use-averaged-model True --avg 5 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn --tdnn-type tdnn6
 
-### TDNN7 (512 3k 0d -  512 3k 0d - 512 3k 0d - Statspooling - Double Swish )
- ./conformer_ctc2/decode.py --epoch 30  --exp-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn7 --result-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn7  --max-duration 400 --method ctc-decoding --use-averaged-model True --avg 5 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn --tdnn-type tdnn7
+## TDNN7 (512 3k 0d -  512 3k 0d - 512 3k 0d - Statspooling - Double Swish )
+#  ./conformer_ctc2/decode.py --epoch 30  --exp-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn7 --result-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn7  --max-duration 400 --method ctc-decoding --use-averaged-model True --avg 5 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn --tdnn-type tdnn7
 
 ### TDNN8 (176 3k 0d -  176 3k 0d - 176  3k 0d - Double Swish)
 #  ./conformer_ctc2/decode.py --epoch 30  --exp-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn8 --result-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn8  --max-duration 400 --method ctc-decoding --use-averaged-model True --avg 5 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn --tdnn-type tdnn8
