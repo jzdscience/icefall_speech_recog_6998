@@ -46,6 +46,3 @@ world_size=`nvidia-smi  -L | wc -l`
 ### Conv_TDNN8 (c-t-t-c)
 ./conformer_ctc2/train.py --world-size $world_size  --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_tdnn8_conv_c_t_t_c --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type c_t_t_c --tdnn-type tdnn8
 
-### Conv_TDNN8 (t-c-c-t)
-./conformer_ctc2/train.py --world-size $world_size  --num-epochs 30 --start-epoch 1 --use-fp16 1 --exp-dir conformer_ctc2/exps/exp_tdnn8_conv_t_c_c_t --max-duration 400 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type t_c_c_t --tdnn-type tdnn8
-

@@ -16,7 +16,7 @@ world_size=`nvidia-smi  -L | wc -l`
  ./conformer_ctc2/decode.py --epoch 30  --exp-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn1 --result-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn1  --max-duration 400 --method ctc-decoding --use-averaged-model True --avg 5 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn --tdnn-type tdnn1
 
 ### TDNN2 (512 3k 0d -  512 3k 0d - 512 3k 0d)
- ./conformer_ctc2/decode.py --epoch 29  --exp-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn2 --result-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn2  --max-duration 400 --method ctc-decoding --use-averaged-model True --avg 4 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn --tdnn-type tdnn2
+ ./conformer_ctc2/decode.py --epoch 30  --exp-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn2 --result-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn2  --max-duration 400 --method ctc-decoding --use-averaged-model True --avg 4 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn --tdnn-type tdnn2
 
 ### TDNN3 (512 5k 0d -  512 5k 2d - 512 5k 4d)
 ./conformer_ctc2/decode.py --epoch 30  --exp-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn3 --result-dir ./conformer_ctc2/exps/exp_all_tdnn_tdnn3  --max-duration 400 --method ctc-decoding --use-averaged-model True --avg 5 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type all_tdnn --tdnn-type tdnn3
@@ -47,7 +47,3 @@ world_size=`nvidia-smi  -L | wc -l`
 
 ### Conv_TDNN8 (c-t-t-c)
  ./conformer_ctc2/decode.py --epoch 30  --exp-dir ./conformer_ctc2/exps/exp_tdnn8_conv_c_t_t_c --result-dir ./conformer_ctc2/exps/exp_tdnn8_conv_c_t_t_c  --max-duration 400 --method ctc-decoding --use-averaged-model True --avg 5 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type c_t_t_c --tdnn-type tdnn8
-
-### Conv_TDNN8 (t-c-c-t)
- ./conformer_ctc2/decode.py --epoch 30  --exp-dir ./conformer_ctc2/exps/exp_tdnn8_conv_t_c_c_t --result-dir ./conformer_ctc2/exps/exp_tdnn8_conv_t_c_c_t  --max-duration 400 --method ctc-decoding --use-averaged-model True --avg 5 --num-encoder-layers 4 --num-decoder-layers 2 --conv-type t_c_c_t --tdnn-type tdnn8
-

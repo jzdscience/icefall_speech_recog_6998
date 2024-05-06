@@ -21,12 +21,11 @@ The study is based on the Conformer-CTC2 recipe of Tedlium3 dataset of the Icefa
 https://github.com/k2-fsa/icefall
 
 The repo was forked on March 16, 2024. Experiments are done via directly modifying and adding into the existing codebase of `conformer_ctc2` recipe.
-The content in the .zip should be placed in `icefall\egs\tedlium3\ASR\` folder.
 
 ==================================================================================================================
 The file structure is illustrated as below,  asteriks *** shows where code addition/revision occurs
 
-icefall/
+icefall_speech_recog_6998/
 -egs/
 --tedlium3/
 ---ASR/
@@ -82,10 +81,13 @@ After this, the `nvcc --version` command should work
 WARNING: Do not use pip/conda install cudatoolkit
 
 3.2.3 Make a activate activate-cuda-12.1.sh  https://k2-fsa.github.io/k2/installation/cuda-cudnn.html#cuda-11-6
+3.2.4 bash ~/activate-cuda-12.1.sh 
 
 3.3. Install Anaconda to manage the virtual environment
-3.3.1 Create an virtual enviroment with Python=3.11.7
+3.3.1 Create an virtual enviroment with 
+conda create -n speech_recog python=3.11.7
 3.3.2 Activate the virtual envrionment
+conda activate speech_recog
 
 3.4. Install ffmpeg. conda install -c conda-forge 'ffmpeg<7'
 
@@ -99,47 +101,57 @@ which includes:
 3.5.3 Lhotse
     pip install lhotse=1.21
 pip install git+https://github.com/lhotse-speech/lhotse
-3.5.4 download Icefall and install the requirements in the repo
-    git clone git@github.com:jzdscience/icefall_speech_recog_6998.git   # this is my fork from https://github.com/k2-fsa/icefall on March 16, 2024
-    pip install -r ./icefall/requirements.txt
 
 
-3.6 Download and unzip my .zip package uploaded as code submission
+3.6.1 enter my folder uploaded as code submission
+(alternatively) download Icefall and install the requirements in the repo
+git clone git@github.com:jzdscience/icefall_speech_recog_6998.git   # this is my fork from https://github.com/k2-fsa/icefall on March 16, 2024
 
-3.7 Put the whole folder `conformer_ctc2` in `icefall\egs\tedlium3\ASR\` folder.
+3.6.2 Install Dependency
+pip install -r ./icefall_6998_speech_recognition/requirements.txt
+
 
 II. RUN THE EXPERIMENT
-A. Prepare data
-1. cd to `icefall\egs\tedlium3\ASR\
+
+A. Change some envrionment variables
+1. put my project path into PYTHONPATH
+export PYTHONPATH=/home/ipsoct4/E6998/icefall_6998_speech_recognition/:$PYTHONPATH
+2. 
+2.1 (option 1) Hide CUDA device so decoding will run on CPU
+export CUDA_VISIBLE_DEVICES=""
+2.2 (option 2) Show CUDA device so training/decoding will run on GPU
+export CUDA_VISIBLE_DEVICES="0,1,2,3"
+
+B. Prepare data
+1. cd to `icefall_speech_recog_6998\egs\tedlium3\ASR\
 2. call `./prepare.sh` to prepare data
-basically, it will first download voice data, lexicon, lm, etcs into `icefall\egs\tedlium3\ASR\download\` ... then prepare and save data to
-`icefall\egs\tedlium3\ASR\data\`
+basically, it will first download voice data, lexicon, lm, etcs into `icefall_speech_recog_6998\egs\tedlium3\ASR\download\` ... then prepare and save data to
+`icefall_speech_recog_6998\egs\tedlium3\ASR\data\`
 
 WARNING1: You do not need to do anything else unless it throw error, which is very likely!
 WARNING2: Even everything is correct, data preparation takes 5-8 hours
 
-B. Training
-1. cd to icefall\egs\tedlium3\ASR\
+C. Training (Optional)
+1. cd to icefall_speech_recog_6998\egs\tedlium3\ASR\
 
 2. call './run_training.sh', it should start to train for all models. 
 WARNING: 
-2.1 It take ~37min*30 epoch* 11 models = 200hrs to finish all training on a VM with 4 Tesla T4 GPU
+2.1 It take ~37min*30 epoch* 14 models = 260hrs to finish all training on a VM with 4 Tesla T4 GPU
 2.2 You can reduce the max-duration is your vRAM is lower than 16GB, otherwise it is not enough.
 2.3 (optional) You can skip training by downloading my model as in section D -1.1
 
-C. Tracking
+D. Tracking (Optional)
 Tracking is done by calling `tensorboard --log_dir=exps/`. The training time information was directly from Tensorboard
 
-D. Decoding 
-1. (Optional) If you do want to save time for training model and use my checkpoints
-1.1 download all required checkpoints of epoch25-30 at https://drive.google.com/drive/folders/1gaGhFexsxj7gNvZ7f8sghRJZ5yvpu4Ng?usp=sharing
-1.2 put the content of downloaded `exps/` folder into `exps/` folder
+E. Decoding 
+1. If you skipped traininig, make sure all subfolders in icefall_speech_recog_6998\egs\tedlium3\ASR\conformer_ctc2\exps\ have required checkpoints of epoch25-30 (as we use last 5 epoch's average model)
 
 2. Call `run_decoding.sh` to decode using all models
+NOTE: It takes ~8 mins for one model's decoding on CPU and 30 seconds on GPU; and we have 14 models.
 
 3. The results of WER will be saved as `wer.summary.clean.txt` `wer.summary.other.txt` in individual run folder, for example,  `/exps/exp_all_tdnn_tdnn8/`
 
-Hopefully by now you would have the results shown in my paper, except for you need to manually calculate the training Time per Epoch (TE) in a spreadsheet or so....
+Hopefully by now you would have the results shown in my paper, except you need to manually calculate the training Time per Epoch (TE) by putting the number from Tensorboard in a spreadsheet or so....
 
 ===========================================================================================================================
 Thank you so much! Please sent me an email jz3702@columbia.edu if you encounter any problem!
